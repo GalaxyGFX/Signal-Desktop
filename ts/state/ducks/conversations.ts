@@ -22,7 +22,12 @@ import { getOwn } from '../../util/getOwn';
 import { assert } from '../../util/assert';
 import { trigger } from '../../shims/events';
 import { AttachmentType } from '../../types/Attachment';
-import { ColorType } from '../../types/Colors';
+import {
+  AvatarColorType,
+  ConversationColorType,
+  CustomColorType,
+} from '../../types/Colors';
+import { ConversationAttributesType } from '../../model-types.d';
 import { BodyRangeType } from '../../types/Util';
 import { CallMode, CallHistoryDetailsFromDiskType } from '../../types/Calling';
 import { MediaItemType } from '../../components/LightboxGallery';
@@ -31,6 +36,8 @@ import {
   getGroupSizeHardLimit,
 } from '../../groups/limits';
 import { toggleSelectedContactForGroupAddition } from '../../groups/toggleSelectedContactForGroupAddition';
+import { GroupNameCollisionsWithIdsByTitle } from '../../util/groupMemberNameCollisions';
+import { ContactSpoofingType } from '../../util/contactSpoofing';
 
 // State
 
@@ -67,7 +74,10 @@ export type ConversationType = {
   areWePendingApproval?: boolean;
   canChangeTimer?: boolean;
   canEditGroupInfo?: boolean;
-  color?: ColorType;
+  color?: AvatarColorType;
+  conversationColor?: ConversationColorType;
+  customColor?: CustomColorType;
+  customColorId?: string;
   discoveredUnregisteredAt?: number;
   isArchived?: boolean;
   isBlocked?: boolean;
@@ -117,7 +127,6 @@ export type ConversationType = {
   isFetchingUUID?: boolean;
   typingContact?: {
     avatarPath?: string;
-    color?: ColorType;
     name?: string;
     phoneNumber?: string;
     profileName?: string;
@@ -131,6 +140,7 @@ export type ConversationType = {
   draftPreview?: string;
 
   sharedGroupNames: Array<string>;
+  groupDescription?: string;
   groupVersion?: 1 | 2;
   groupId?: string;
   groupLink?: string;
@@ -138,6 +148,7 @@ export type ConversationType = {
   acceptedMessageRequest: boolean;
   secretParams?: string;
   publicParams?: string;
+  acknowledgedGroupNameCollisions?: GroupNameCollisionsWithIdsByTitle;
 };
 export type ConversationLookupType = {
   [key: string]: ConversationType;
@@ -152,18 +163,20 @@ export type MessageType = {
   source?: string;
   sourceUuid?: string;
   type?:
-    | 'incoming'
-    | 'outgoing'
-    | 'group'
-    | 'keychange'
-    | 'verified-change'
-    | 'message-history-unsynced'
     | 'call-history'
     | 'chat-session-refreshed'
+    | 'delivery-issue'
+    | 'group'
     | 'group-v1-migration'
     | 'group-v2-change'
+    | 'incoming'
+    | 'keychange'
+    | 'message-history-unsynced'
+    | 'outgoing'
     | 'profile-change'
-    | 'timer-notification';
+    | 'timer-notification'
+    | 'universal-timer-notification'
+    | 'verified-change';
   quote?: { author?: string; authorUuid?: string };
   received_at: number;
   sent_at?: number;
@@ -227,6 +240,7 @@ export type PreJoinConversationType = {
     loading?: boolean;
     url?: string;
   };
+  groupDescription?: string;
   memberCount: number;
   title: string;
   approvalRequired: boolean;
@@ -270,9 +284,15 @@ type ComposerStateType =
         | { isCreating: true; hasError: false }
       ));
 
-type ContactSpoofingReviewStateType = {
-  safeConversationId: string;
-};
+type ContactSpoofingReviewStateType =
+  | {
+      type: ContactSpoofingType.DirectConversationWithSameTitle;
+      safeConversationId: string;
+    }
+  | {
+      type: ContactSpoofingType.MultipleGroupMembersWithSameTitle;
+      groupConversationId: string;
+    };
 
 export type ConversationsStateType = {
   preJoinConversation?: PreJoinConversationType;
@@ -322,6 +342,9 @@ export const getConversationCallMode = (
 
 // Actions
 
+const COLORS_CHANGED = 'conversations/COLORS_CHANGED';
+const CUSTOM_COLOR_REMOVED = 'conversations/CUSTOM_COLOR_REMOVED';
+
 type CantAddContactToGroupActionType = {
   type: 'CANT_ADD_CONTACT_TO_GROUP';
   payload: {
@@ -343,6 +366,20 @@ type CloseMaximumGroupSizeModalActionType = {
 };
 type CloseRecommendedGroupSizeModalActionType = {
   type: 'CLOSE_RECOMMENDED_GROUP_SIZE_MODAL';
+};
+type ColorsChangedActionType = {
+  type: typeof COLORS_CHANGED;
+  payload: {
+    conversationColor?: ConversationColorType;
+    customColorData?: {
+      id: string;
+      value: CustomColorType;
+    };
+  };
+};
+type CustomColorRemovedActionType = {
+  type: typeof CUSTOM_COLOR_REMOVED;
+  payload: string;
 };
 type SetPreJoinConversationActionType = {
   type: 'SET_PRE_JOIN_CONVERSATION';
@@ -515,6 +552,12 @@ export type SelectedConversationChangedActionType = {
     messageId?: string;
   };
 };
+type ReviewGroupMemberNameCollisionActionType = {
+  type: 'REVIEW_GROUP_MEMBER_NAME_COLLISION';
+  payload: {
+    groupConversationId: string;
+  };
+};
 type ReviewMessageRequestNameCollisionActionType = {
   type: 'REVIEW_MESSAGE_REQUEST_NAME_COLLISION';
   payload: {
@@ -584,6 +627,8 @@ export type ConversationActionType =
   | ConversationChangedActionType
   | ConversationRemovedActionType
   | ConversationUnloadedActionType
+  | ColorsChangedActionType
+  | CustomColorRemovedActionType
   | CreateGroupFulfilledActionType
   | CreateGroupPendingActionType
   | CreateGroupRejectedActionType
@@ -596,6 +641,7 @@ export type ConversationActionType =
   | RemoveAllConversationsActionType
   | RepairNewestMessageActionType
   | RepairOldestMessageActionType
+  | ReviewGroupMemberNameCollisionActionType
   | ReviewMessageRequestNameCollisionActionType
   | ScrollToMessageActionType
   | SelectedConversationChangedActionType
@@ -643,11 +689,15 @@ export const actions = {
   openConversationExternal,
   openConversationInternal,
   removeAllConversations,
+  removeCustomColorOnConversations,
   repairNewestMessage,
   repairOldestMessage,
+  resetAllChatColors,
+  reviewGroupMemberNameCollision,
   reviewMessageRequestNameCollision,
   scrollToMessage,
   selectMessage,
+  setAllConversationColors,
   setComposeGroupAvatar,
   setComposeGroupName,
   setComposeSearchTerm,
@@ -666,6 +716,101 @@ export const actions = {
   startSettingGroupMetadata,
   toggleConversationInChooseMembers,
 };
+
+function removeCustomColorOnConversations(
+  colorId: string
+): ThunkAction<void, RootStateType, unknown, CustomColorRemovedActionType> {
+  return async dispatch => {
+    const conversationsToUpdate: Array<ConversationAttributesType> = [];
+    // We don't want to trigger a model change because we're updating redux
+    // here manually ourselves. Au revoir Backbone!
+    window.getConversations().forEach(conversation => {
+      if (conversation.get('customColorId') === colorId) {
+        // eslint-disable-next-line no-param-reassign
+        delete conversation.attributes.conversationColor;
+        // eslint-disable-next-line no-param-reassign
+        delete conversation.attributes.customColor;
+        // eslint-disable-next-line no-param-reassign
+        delete conversation.attributes.customColorId;
+
+        conversationsToUpdate.push(conversation.attributes);
+      }
+    });
+
+    if (conversationsToUpdate.length) {
+      await window.Signal.Data.updateConversations(conversationsToUpdate);
+    }
+
+    dispatch({
+      type: CUSTOM_COLOR_REMOVED,
+      payload: colorId,
+    });
+  };
+}
+
+function resetAllChatColors(): ThunkAction<
+  void,
+  RootStateType,
+  unknown,
+  ColorsChangedActionType
+> {
+  return async dispatch => {
+    // Calling this with no args unsets all the colors in the db
+    await window.Signal.Data.updateAllConversationColors();
+
+    // We don't want to trigger a model change because we're updating redux
+    // here manually ourselves. Au revoir Backbone!
+    window.getConversations().forEach(conversation => {
+      // eslint-disable-next-line no-param-reassign
+      delete conversation.attributes.conversationColor;
+      // eslint-disable-next-line no-param-reassign
+      delete conversation.attributes.customColor;
+      // eslint-disable-next-line no-param-reassign
+      delete conversation.attributes.customColorId;
+    });
+
+    dispatch({
+      type: COLORS_CHANGED,
+      payload: {
+        conversationColor: undefined,
+        customColorData: undefined,
+      },
+    });
+  };
+}
+
+function setAllConversationColors(
+  conversationColor: ConversationColorType,
+  customColorData?: {
+    id: string;
+    value: CustomColorType;
+  }
+): ThunkAction<void, RootStateType, unknown, ColorsChangedActionType> {
+  return async dispatch => {
+    await window.Signal.Data.updateAllConversationColors(
+      conversationColor,
+      customColorData
+    );
+
+    // We don't want to trigger a model change because we're updating redux
+    // here manually ourselves. Au revoir Backbone!
+    window.getConversations().forEach(conversation => {
+      Object.assign(conversation.attributes, {
+        conversationColor,
+        customColor: customColorData?.value,
+        customColorId: customColorData?.id,
+      });
+    });
+
+    dispatch({
+      type: COLORS_CHANGED,
+      payload: {
+        conversationColor,
+        customColorData,
+      },
+    });
+  };
+}
 
 function cantAddContactToGroup(
   conversationId: string
@@ -872,6 +1017,15 @@ function repairOldestMessage(
     payload: {
       conversationId,
     },
+  };
+}
+
+function reviewGroupMemberNameCollision(
+  groupConversationId: string
+): ReviewGroupMemberNameCollisionActionType {
+  return {
+    type: 'REVIEW_GROUP_MEMBER_NAME_COLLISION',
+    payload: { groupConversationId },
   };
 }
 
@@ -1410,8 +1564,9 @@ export function reducer(
     let { showArchived } = state;
 
     const existing = conversationLookup[id];
-    // In the change case we only modify the lookup if we already had that conversation
-    if (!existing) {
+    // We only modify the lookup if we already had that conversation and the conversation
+    //   changed.
+    if (!existing || data === existing) {
       return state;
     }
 
@@ -1913,10 +2068,23 @@ export function reducer(
     };
   }
 
+  if (action.type === 'REVIEW_GROUP_MEMBER_NAME_COLLISION') {
+    return {
+      ...state,
+      contactSpoofingReview: {
+        type: ContactSpoofingType.MultipleGroupMembersWithSameTitle,
+        ...action.payload,
+      },
+    };
+  }
+
   if (action.type === 'REVIEW_MESSAGE_REQUEST_NAME_COLLISION') {
     return {
       ...state,
-      contactSpoofingReview: action.payload,
+      contactSpoofingReview: {
+        type: ContactSpoofingType.DirectConversationWithSameTitle,
+        ...action.payload,
+      },
     };
   }
 
@@ -2343,6 +2511,74 @@ export function reducer(
         ),
       },
     };
+  }
+
+  if (action.type === COLORS_CHANGED) {
+    const { conversationLookup } = state;
+    const { conversationColor, customColorData } = action.payload;
+
+    const nextState = {
+      ...state,
+    };
+
+    Object.keys(conversationLookup).forEach(id => {
+      const existing = conversationLookup[id];
+      const added = {
+        ...existing,
+        conversationColor,
+        customColor: customColorData?.value,
+        customColorId: customColorData?.id,
+      };
+
+      Object.assign(
+        nextState,
+        updateConversationLookups(added, existing, nextState),
+        {
+          conversationLookup: {
+            ...nextState.conversationLookup,
+            [id]: added,
+          },
+        }
+      );
+    });
+
+    return nextState;
+  }
+
+  if (action.type === CUSTOM_COLOR_REMOVED) {
+    const { conversationLookup } = state;
+    const colorId = action.payload;
+
+    const nextState = {
+      ...state,
+    };
+
+    Object.keys(conversationLookup).forEach(id => {
+      const existing = conversationLookup[id];
+
+      if (existing.customColorId !== colorId) {
+        return;
+      }
+
+      const changed = omit(existing, [
+        'conversationColor',
+        'customColor',
+        'customColorId',
+      ]);
+
+      Object.assign(
+        nextState,
+        updateConversationLookups(changed, existing, nextState),
+        {
+          conversationLookup: {
+            ...nextState.conversationLookup,
+            [id]: changed,
+          },
+        }
+      );
+    });
+
+    return nextState;
   }
 
   return state;

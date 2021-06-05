@@ -766,14 +766,25 @@ export class CallingClass {
     const timestamp = Date.now();
 
     // We "fire and forget" because sending this message is non-essential.
+    const {
+      ContentHint,
+    } = window.textsecure.protobuf.UnidentifiedSenderMessage.Message;
     wrapWithSyncMessageSend({
       conversation,
-      logId: `sendGroupCallUpdateMessage/${conversationId}-${eraId}`,
-      send: sender =>
-        sender.sendGroupCallUpdate({ eraId, groupV2, timestamp }, sendOptions),
+      logId: `sendToGroup/groupCallUpdate/${conversationId}-${eraId}`,
+      send: () =>
+        window.Signal.Util.sendToGroup(
+          { groupCallUpdate: { eraId }, groupV2, timestamp },
+          conversation,
+          ContentHint.SUPPLEMENTARY,
+          sendOptions
+        ),
       timestamp,
     }).catch(err => {
-      window.log.error('Failed to send group call update', err);
+      window.log.error(
+        'Failed to send group call update:',
+        err && err.stack ? err.stack : err
+      );
     });
   }
 

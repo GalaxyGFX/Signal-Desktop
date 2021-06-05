@@ -4,6 +4,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { AttachmentType } from '../types/Attachment';
+import { ConversationColorType, CustomColorType } from '../types/Colors';
 import { ConversationModel } from '../models/conversations';
 import { GroupV2PendingMemberType } from '../model-types.d';
 import { LinkPreviewType } from '../types/message/LinkPreviews';
@@ -12,6 +13,9 @@ import { MessageModel } from '../models/messages';
 import { MessageType } from '../state/ducks/conversations';
 import { assert } from '../util/assert';
 import { maybeParseUrl } from '../util/url';
+import { addReportSpamJob } from '../jobs/helpers/addReportSpamJob';
+import { reportSpamJobQueue } from '../jobs/reportSpamJobQueue';
+import { GroupNameCollisionsWithIdsByTitle } from '../util/groupMemberNameCollisions';
 
 type GetLinkPreviewImageResult = {
   data: ArrayBuffer;
@@ -317,6 +321,11 @@ Whisper.AlreadyRequestedToJoinToast = Whisper.ToastView.extend({
   template: () => window.i18n('GroupV2--join--already-awaiting-approval'),
 });
 
+const ReportedSpamAndBlockedToast = Whisper.ToastView.extend({
+  template: () =>
+    window.i18n('MessageRequests--block-and-report-spam-success-toast'),
+});
+
 Whisper.ConversationLoadingScreen = Whisper.View.extend({
   template: () => $('#conversation-loading-screen').html(),
   className: 'conversation-loading-screen',
@@ -386,18 +395,6 @@ Whisper.ConversationView = Whisper.View.extend({
     this.model.throttledGetProfiles =
       this.model.throttledGetProfiles ||
       window._.throttle(this.model.getProfiles.bind(this.model), FIVE_MINUTES);
-    this.model.throttledUpdateSharedGroups =
-      this.model.throttledUpdateSharedGroups ||
-      window._.throttle(
-        this.model.updateSharedGroups.bind(this.model),
-        FIVE_MINUTES
-      );
-    this.model.throttledMaybeMigrateV1Group =
-      this.model.throttledMaybeMigrateV1Group ||
-      window._.throttle(
-        this.model.maybeMigrateV1Group.bind(this.model),
-        FIVE_MINUTES
-      );
 
     this.debouncedMaybeGrabLinkPreview = window._.debounce(
       this.maybeGrabLinkPreview.bind(this),
@@ -550,6 +547,9 @@ Whisper.ConversationView = Whisper.View.extend({
             }
           },
 
+          onShowChatColorEditor: () => {
+            this.showChatColorEditor();
+          },
           onShowConversationDetails: () => {
             this.showConversationDetails();
           },
@@ -599,6 +599,8 @@ Whisper.ConversationView = Whisper.View.extend({
   },
 
   setupCompositionArea({ attachmentListEl }: any) {
+    const { model }: { model: ConversationModel } = this;
+
     const compositionApi = { current: null };
     this.compositionApi = compositionApi;
 
@@ -626,9 +628,6 @@ Whisper.ConversationView = Whisper.View.extend({
         bodyRanges: Array<typeof window.Whisper.BodyRangeType>,
         caretLocation?: number
       ) => this.onEditorStateChange(msg, bodyRanges, caretLocation),
-      setSecureInput: (enabled: boolean) => {
-        window.setSecureInput(enabled);
-      },
       onTextTooLong: () => this.showToast(Whisper.MessageBodyTooLongToast),
       onChooseAttachment: this.onChooseAttachment.bind(this),
       getQuotedMessage: () => this.model.get('quotedMessageId'),
@@ -636,22 +635,35 @@ Whisper.ConversationView = Whisper.View.extend({
       micCellEl,
       attachmentListEl,
       onAccept: () => {
-        this.syncMessageRequestResponse('onAccept', messageRequestEnum.ACCEPT);
+        this.syncMessageRequestResponse(
+          'onAccept',
+          model,
+          messageRequestEnum.ACCEPT
+        );
       },
       onBlock: () => {
-        this.syncMessageRequestResponse('onBlock', messageRequestEnum.BLOCK);
+        this.syncMessageRequestResponse(
+          'onBlock',
+          model,
+          messageRequestEnum.BLOCK
+        );
       },
       onUnblock: () => {
-        this.syncMessageRequestResponse('onUnblock', messageRequestEnum.ACCEPT);
+        this.syncMessageRequestResponse(
+          'onUnblock',
+          model,
+          messageRequestEnum.ACCEPT
+        );
       },
       onDelete: () => {
-        this.syncMessageRequestResponse('onDelete', messageRequestEnum.DELETE);
-      },
-      onBlockAndDelete: () => {
         this.syncMessageRequestResponse(
-          'onBlockAndDelete',
-          messageRequestEnum.BLOCK_AND_DELETE
+          'onDelete',
+          model,
+          messageRequestEnum.DELETE
         );
+      },
+      onBlockAndReportSpam: () => {
+        this.blockAndReportSpam(model);
       },
       onStartGroupMigration: () => this.startMigrationToGV2(),
       onCancelJoinRequest: async () => {
@@ -956,6 +968,21 @@ Whisper.ConversationView = Whisper.View.extend({
       await this.model.markRead(message.get('received_at'));
     };
 
+    const createMessageRequestResponseHandler = (
+      name: string,
+      enumValue: number
+    ): ((conversationId: string) => void) => conversationId => {
+      const conversation = window.ConversationController.get(conversationId);
+      if (!conversation) {
+        assert(
+          false,
+          `Expected a conversation to be found in ${name}. Doing nothing`
+        );
+        return;
+      }
+      this.syncMessageRequestResponse(name, conversation, enumValue);
+    };
+
     this.timelineView = new Whisper.ReactWrapperView({
       className: 'timeline-wrapper',
       JSX: window.Signal.State.Roots.createTimeline(window.reduxStore, {
@@ -963,34 +990,51 @@ Whisper.ConversationView = Whisper.View.extend({
 
         ...this.getMessageActions(),
 
+        acknowledgeGroupMemberNameCollisions: (
+          groupNameCollisions: Readonly<GroupNameCollisionsWithIdsByTitle>
+        ): void => {
+          const { model }: { model: ConversationModel } = this;
+          model.acknowledgeGroupMemberNameCollisions(groupNameCollisions);
+        },
         contactSupport,
         loadNewerMessages,
         loadNewestMessages: this.loadNewestMessages.bind(this),
         loadAndScroll: this.loadAndScroll.bind(this),
         loadOlderMessages,
         markMessageRead,
-        onBlock: () => {
-          this.syncMessageRequestResponse('onBlock', messageRequestEnum.BLOCK);
-        },
-        onBlockAndDelete: () => {
-          this.syncMessageRequestResponse(
-            'onBlockAndDelete',
-            messageRequestEnum.BLOCK_AND_DELETE
+        onBlock: createMessageRequestResponseHandler(
+          'onBlock',
+          messageRequestEnum.BLOCK
+        ),
+        onBlockAndReportSpam: (conversationId: string) => {
+          const conversation = window.ConversationController.get(
+            conversationId
           );
+          if (!conversation) {
+            assert(
+              false,
+              'Expected a conversation to be found in onBlockAndReportSpam. Doing nothing'
+            );
+            return;
+          }
+          this.blockAndReportSpam(conversation);
         },
-        onDelete: () => {
-          this.syncMessageRequestResponse(
-            'onDelete',
-            messageRequestEnum.DELETE
-          );
-        },
-        onUnblock: () => {
-          this.syncMessageRequestResponse(
-            'onUnblock',
-            messageRequestEnum.ACCEPT
-          );
-        },
+        onDelete: createMessageRequestResponseHandler(
+          'onDelete',
+          messageRequestEnum.DELETE
+        ),
+        onUnblock: createMessageRequestResponseHandler(
+          'onUnblock',
+          messageRequestEnum.ACCEPT
+        ),
         onShowContactModal: this.showContactModal.bind(this),
+        removeMember: (conversationId: string) => {
+          const { model }: { model: ConversationModel } = this;
+          this.longRunningTaskWrapper({
+            name: 'removeMember',
+            task: () => model.removeFromGroupV2(conversationId),
+          });
+        },
         scrollToQuotedMessage,
         unblurAvatar: () => {
           this.model.unblurAvatar();
@@ -1078,7 +1122,7 @@ Whisper.ConversationView = Whisper.View.extend({
 
     const finish = () => {
       resolvePromise();
-      this.model.inProgressFinish = null;
+      this.model.inProgressFetch = null;
     };
 
     return finish;
@@ -1462,12 +1506,33 @@ Whisper.ConversationView = Whisper.View.extend({
 
   syncMessageRequestResponse(
     name: string,
+    model: ConversationModel,
     messageRequestType: number
   ): Promise<void> {
-    const { model }: { model: ConversationModel } = this;
     return this.longRunningTaskWrapper({
       name,
       task: model.syncMessageRequestResponse.bind(model, messageRequestType),
+    });
+  },
+
+  blockAndReportSpam(model: ConversationModel): Promise<void> {
+    const messageRequestEnum =
+      window.textsecure.protobuf.SyncMessage.MessageRequestResponse.Type;
+
+    return this.longRunningTaskWrapper({
+      name: 'blockAndReportSpam',
+      task: async () => {
+        await Promise.all([
+          model.syncMessageRequestResponse(messageRequestEnum.BLOCK),
+          addReportSpamJob({
+            conversation: model.format(),
+            getMessageServerGuidsForSpam:
+              window.Signal.Data.getMessageServerGuidsForSpam,
+            jobQueue: reportSpamJobQueue,
+          }),
+        ]);
+        this.showToast(ReportedSpamAndBlockedToast);
+      },
     });
   },
 
@@ -2153,6 +2218,8 @@ Whisper.ConversationView = Whisper.View.extend({
   },
 
   async onOpened(messageId: any) {
+    const { model }: { model: ConversationModel } = this;
+
     if (messageId) {
       const message = await getMessageById(messageId, {
         Message: Whisper.Message,
@@ -2166,29 +2233,41 @@ Whisper.ConversationView = Whisper.View.extend({
       window.log.warn(`onOpened: Did not find message ${messageId}`);
     }
 
+    const { retryPlaceholders } = window.Signal.Services;
+    if (retryPlaceholders) {
+      const placeholders = await retryPlaceholders.findByConversationAndRemove(
+        model.id
+      );
+      window.log.info(`onOpened: Found ${placeholders.length} placeholders`);
+    }
+
     this.loadNewestMessages();
-    this.model.updateLastMessage();
+    model.updateLastMessage();
 
     this.focusMessageField();
 
-    const quotedMessageId = this.model.get('quotedMessageId');
+    const quotedMessageId = model.get('quotedMessageId');
     if (quotedMessageId) {
       this.setQuoteMessage(quotedMessageId);
     }
 
-    this.model.fetchLatestGroupV2Data();
-    this.model.throttledMaybeMigrateV1Group();
+    model.fetchLatestGroupV2Data();
     assert(
-      this.model.throttledFetchSMSOnlyUUID !== undefined,
+      model.throttledMaybeMigrateV1Group !== undefined,
       'Conversation model should be initialized'
     );
-    this.model.throttledFetchSMSOnlyUUID();
+    model.throttledMaybeMigrateV1Group();
+    assert(
+      model.throttledFetchSMSOnlyUUID !== undefined,
+      'Conversation model should be initialized'
+    );
+    model.throttledFetchSMSOnlyUUID();
 
     const statusPromise = this.model.throttledGetProfiles();
     // eslint-disable-next-line more/no-then
     this.statusFetch = statusPromise.then(() =>
       // eslint-disable-next-line more/no-then
-      this.model.updateVerified().then(() => {
+      model.updateVerified().then(() => {
         this.onVerifiedChange();
         this.statusFetch = null;
       })
@@ -2258,9 +2337,6 @@ Whisper.ConversationView = Whisper.View.extend({
               {},
               document.querySelector('.module-ForwardMessageModal')
             ),
-          setSecureInput: (enabled: boolean) => {
-            window.setSecureInput(enabled);
-          },
         }
       ),
     });
@@ -3052,6 +3128,12 @@ Whisper.ConversationView = Whisper.View.extend({
             resolve: () => this.model.toggleAdmin(conversationId),
           });
         },
+        updateSharedGroups: () => {
+          const conversation = window.ConversationController.get(contactId);
+          if (conversation && conversation.throttledUpdateSharedGroups) {
+            conversation.throttledUpdateSharedGroups();
+          }
+        },
       }),
     });
 
@@ -3124,6 +3206,44 @@ Whisper.ConversationView = Whisper.View.extend({
     view.render();
   },
 
+  showChatColorEditor() {
+    const conversation: ConversationModel = this.model;
+
+    const view = new Whisper.ReactWrapperView({
+      className: 'panel',
+      JSX: window.Signal.State.Roots.createChatColorPicker(window.reduxStore, {
+        conversationId: conversation.get('id'),
+        onSelectColor: (
+          color: ConversationColorType,
+          customColorData?: {
+            id: string;
+            value: CustomColorType;
+          }
+        ) => {
+          conversation.set('conversationColor', color);
+          if (customColorData) {
+            conversation.set('customColor', customColorData.value);
+            conversation.set('customColorId', customColorData.id);
+          } else {
+            conversation.unset('customColor');
+            conversation.unset('customColorId');
+          }
+          window.Signal.Data.updateConversation(conversation.attributes);
+        },
+        onChatColorReset: () => {
+          conversation.set('conversationColor', undefined);
+          conversation.unset('customColor');
+          window.Signal.Data.updateConversation(conversation.attributes);
+        },
+      }),
+    });
+
+    view.headerTitle = window.i18n('ChatColorPicker__menu-title');
+
+    this.listenBack(view);
+    view.render();
+  },
+
   showConversationDetails() {
     const conversation: ConversationModel = this.model;
 
@@ -3141,7 +3261,11 @@ Whisper.ConversationView = Whisper.View.extend({
     };
 
     const onBlock = () => {
-      this.syncMessageRequestResponse('onBlock', messageRequestEnum.BLOCK);
+      this.syncMessageRequestResponse(
+        'onBlock',
+        conversation,
+        messageRequestEnum.BLOCK
+      );
     };
 
     const ACCESS_ENUM = window.textsecure.protobuf.AccessControl.AccessRequired;
@@ -3160,6 +3284,7 @@ Whisper.ConversationView = Whisper.View.extend({
       setDisappearingMessages: this.setDisappearingMessages.bind(this),
       showAllMedia: this.showAllMedia.bind(this),
       showContactModal: this.showContactModal.bind(this),
+      showGroupChatColorEditor: this.showChatColorEditor.bind(this),
       showGroupLinkManagement: this.showGroupLinkManagement.bind(this),
       showGroupV2Permissions: this.showGroupV2Permissions.bind(this),
       showPendingInvites: this.showPendingInvites.bind(this),
@@ -3423,6 +3548,7 @@ Whisper.ConversationView = Whisper.View.extend({
 
   async destroyMessages() {
     window.showConfirmationDialog({
+      confirmStyle: 'negative',
       message: window.i18n('deleteConversationConfirmation'),
       okText: window.i18n('delete'),
       resolve: () => {
@@ -3625,14 +3751,7 @@ Whisper.ConversationView = Whisper.View.extend({
 
     const props = message.getPropsForQuote();
 
-    this.listenTo(message, 'scroll-to-message', () => {
-      this.scrollToMessage(message.quotedMessage.id);
-    });
-
     const contact = this.quotedMessage.getContact();
-    if (contact) {
-      this.listenTo(contact, 'change', this.renderQuotedMessage);
-    }
 
     this.quoteView = new Whisper.ReactWrapperView({
       className: 'quote-wrapper',
@@ -3642,6 +3761,7 @@ Whisper.ConversationView = Whisper.View.extend({
       props: {
         ...props,
         withContentAbove: true,
+        onClick: () => this.scrollToMessage(message.quotedMessage.id),
         onClose: () => {
           // This can't be the normal 'onClose' because that is always run when this
           //   view is removed from the DOM, and would clear the draft quote.
@@ -3649,6 +3769,12 @@ Whisper.ConversationView = Whisper.View.extend({
         },
       },
     });
+
+    if (contact) {
+      this.quoteView.listenTo(contact, 'change', () => {
+        this.renderQuotedMessage();
+      });
+    }
   },
 
   showInvalidMessageToast(messageText?: string): boolean {

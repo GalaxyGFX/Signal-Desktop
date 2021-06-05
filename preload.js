@@ -142,9 +142,6 @@ try {
     window.log.info('show window');
     ipc.send('show-window');
   };
-  window.setSecureInput = enabled => {
-    ipc.send('set-secure-input', enabled);
-  };
 
   window.titleBarDoubleClick = () => {
     ipc.send('title-bar-double-click');
@@ -370,6 +367,8 @@ try {
   installGetter('sync-request', 'getSyncRequest');
   installGetter('sync-time', 'getLastSyncTime');
   installSetter('sync-time', 'setLastSyncTime');
+  installGetter('universal-expire-timer', 'getUniversalExpireTimer');
+  installSetter('universal-expire-timer', 'setUniversalExpireTimer');
 
   ipc.on('delete-all-data', async () => {
     const { deleteAllData } = window.Events;
@@ -553,6 +552,11 @@ try {
   window.baseStickersPath = Attachments.getStickersPath(userDataPath);
   window.baseTempPath = Attachments.getTempPath(userDataPath);
   window.baseDraftPath = Attachments.getDraftPath(userDataPath);
+
+  const { addSensitivePath } = require('./ts/util/privacy');
+
+  addSensitivePath(window.baseAttachmentsPath);
+
   window.Signal = Signal.setup({
     Attachments,
     userDataPath,

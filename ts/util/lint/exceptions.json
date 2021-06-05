@@ -1234,11 +1234,35 @@
     "reasonDetail": "Protected from arbitrary input"
   },
   {
+    "rule": "jQuery-$(",
+    "path": "js/views/settings_view.js",
+    "line": "    template: () => $('#disappearingMessagesSettings').html(),",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-27T01:33:06.541Z",
+    "reasonDetail": "Interacting with already-existing DOM nodes"
+  },
+  {
+    "rule": "jQuery-$(",
+    "path": "js/views/settings_view.js",
+    "line": "      this.$('.disappearing-messages-setting').append(",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-27T01:33:06.541Z",
+    "reasonDetail": "Interacting with already-existing DOM nodes"
+  },
+  {
     "rule": "jQuery-append(",
     "path": "js/views/settings_view.js",
     "line": "        this.$('.sync-setting').append(syncView.el);",
     "reasonCategory": "usageTrusted",
     "updated": "2020-08-21T11:29:29.636Z",
+    "reasonDetail": "Interacting with already-existing DOM nodes"
+  },
+  {
+    "rule": "jQuery-append(",
+    "path": "js/views/settings_view.js",
+    "line": "      this.$('.disappearing-messages-setting').append(",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-27T01:33:06.541Z",
     "reasonDetail": "Interacting with already-existing DOM nodes"
   },
   {
@@ -1256,6 +1280,14 @@
     "reasonCategory": "usageTrusted",
     "updated": "2021-02-26T18:44:56.450Z",
     "reasonDetail": "Static selector, read-only access"
+  },
+  {
+    "rule": "jQuery-html(",
+    "path": "js/views/settings_view.js",
+    "line": "    template: () => $('#disappearingMessagesSettings').html(),",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-27T01:33:06.541Z",
+    "reasonDetail": "Interacting with already-existing DOM nodes"
   },
   {
     "rule": "jQuery-$(",
@@ -4889,12 +4921,6 @@
     "line": "        'innerHTML',",
     "reasonCategory": "falseMatch",
     "updated": "2018-09-15T00:38:04.183Z"
-  },
-  {
-    "rule": "jQuery-$(",
-    "path": "node_modules/history/node_modules/js-tokens/index.js",
-    "reasonCategory": "falseMatch",
-    "updated": "2019-12-11T01:10:06.091Z"
   },
   {
     "rule": "jQuery-$(",
@@ -8724,6 +8750,13 @@
     "updated": "2019-03-09T00:08:44.242Z"
   },
   {
+    "rule": "jQuery-$(",
+    "path": "node_modules/loose-envify/node_modules/js-tokens/index.js",
+    "reasonCategory": "falseMatch",
+    "updated": "2021-05-24T17:14:21.037Z",
+    "reasonDetail": "This is inside of a regular expression and is not jQuery."
+  },
+  {
     "rule": "jQuery-load(",
     "path": "node_modules/loud-rejection/node_modules/signal-exit/index.js",
     "line": "    load()",
@@ -12488,12 +12521,6 @@
     "updated": "2021-04-05T20:48:36.065Z"
   },
   {
-    "rule": "jQuery-$(",
-    "path": "node_modules/redux/node_modules/js-tokens/index.js",
-    "reasonCategory": "falseMatch",
-    "updated": "2019-03-09T00:08:44.242Z"
-  },
-  {
     "rule": "jQuery-load(",
     "path": "node_modules/ref-array-napi/node_modules/debug/src/browser.js",
     "line": "function load() {",
@@ -13563,6 +13590,13 @@
     "reasonDetail": "Used only to set focus"
   },
   {
+    "rule": "React-useRef",
+    "path": "ts/components/ChatColorPicker.js",
+    "line": "    const menuRef = react_1.useRef(null);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-25T18:25:53.896Z"
+  },
+  {
     "rule": "DOM-innerHTML",
     "path": "ts/components/CompositionArea.js",
     "line": "    el.innerHTML = '';",
@@ -13704,6 +13738,13 @@
   },
   {
     "rule": "React-useRef",
+    "path": "ts/components/GradientDial.js",
+    "line": "    const containerRef = react_1.useRef(null);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-25T18:25:53.896Z"
+  },
+  {
+    "rule": "React-useRef",
     "path": "ts/components/GroupCallOverflowArea.js",
     "line": "    const overflowRef = react_1.useRef(null);",
     "reasonCategory": "usageTrusted",
@@ -13725,6 +13766,27 @@
     "reasonCategory": "usageTrusted",
     "updated": "2020-11-17T23:29:38.698Z",
     "reasonDetail": "Doesn't touch the DOM."
+  },
+  {
+    "rule": "React-useRef",
+    "path": "ts/components/GroupDescriptionInput.js",
+    "line": "    const innerRef = react_1.useRef(null);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-29T02:15:39.186Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "ts/components/GroupDescriptionInput.js",
+    "line": "    const valueOnKeydownRef = react_1.useRef(value);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-29T02:15:39.186Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "ts/components/GroupDescriptionInput.js",
+    "line": "    const selectionStartOnKeydownRef = react_1.useRef(value.length);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-29T02:15:39.186Z"
   },
   {
     "rule": "React-useRef",
@@ -13821,6 +13883,27 @@
   },
   {
     "rule": "React-useRef",
+    "path": "ts/components/Slider.js",
+    "line": "    const diff = react_1.useRef(0);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-25T18:25:53.896Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "ts/components/Slider.js",
+    "line": "    const handleRef = react_1.useRef(null);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-25T18:25:53.896Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "ts/components/Slider.js",
+    "line": "    const sliderRef = react_1.useRef(null);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-25T18:25:53.896Z"
+  },
+  {
+    "rule": "React-useRef",
     "path": "ts/components/Tooltip.js",
     "line": "    const wrapperRef = react_1.default.useRef(null);",
     "reasonCategory": "usageTrusted",
@@ -13888,6 +13971,13 @@
     "reasonCategory": "usageTrusted",
     "updated": "2021-04-17T01:47:31.419Z",
     "reasonDetail": "Used for managing playback of GIF video"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "ts/components/conversation/GroupDescription.js",
+    "line": "    const textRef = react_1.useRef(null);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2021-05-29T02:15:39.186Z"
   },
   {
     "rule": "React-createRef",
@@ -14076,7 +14166,7 @@
   {
     "rule": "jQuery-append(",
     "path": "ts/logging/debuglogs.js",
-    "line": "    form.append('key', fields.key);",
+    "line": "    form.append('key', uploadKey);",
     "reasonCategory": "falseMatch",
     "updated": "2020-12-17T18:08:07.752Z"
   },
@@ -14104,7 +14194,7 @@
   {
     "rule": "jQuery-append(",
     "path": "ts/logging/debuglogs.ts",
-    "line": "  form.append('key', fields.key);",
+    "line": "  form.append('key', uploadKey);",
     "reasonCategory": "falseMatch",
     "updated": "2020-12-17T18:08:07.752Z"
   },

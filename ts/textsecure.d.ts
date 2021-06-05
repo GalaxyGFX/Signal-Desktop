@@ -1,6 +1,8 @@
 // Copyright 2020-2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { UnidentifiedSenderMessageContent } from '@signalapp/signal-client';
+
 import Crypto from './textsecure/Crypto';
 import MessageReceiver from './textsecure/MessageReceiver';
 import MessageSender from './textsecure/SendMessage';
@@ -20,6 +22,7 @@ export type UnprocessedType = {
   envelope?: string;
   id: string;
   timestamp: number;
+  serverGuid?: string;
   serverTimestamp?: number;
   source?: string;
   sourceDevice?: number;
@@ -277,6 +280,7 @@ export declare class GroupClass {
   membersPendingProfileKey?: Array<MemberPendingProfileKeyClass>;
   membersPendingAdminApproval?: Array<MemberPendingAdminApprovalClass>;
   inviteLinkPassword?: ProtoBinaryType;
+  descriptionBytes?: ProtoBinaryType;
 }
 
 export declare class GroupChangeClass {
@@ -319,6 +323,7 @@ export declare namespace GroupChangeClass {
     deleteMemberPendingAdminApprovals?: Array<GroupChangeClass.Actions.DeleteMemberPendingAdminApprovalAction>;
     promoteMemberPendingAdminApprovals?: Array<GroupChangeClass.Actions.PromoteMemberPendingAdminApprovalAction>;
     modifyInviteLinkPassword?: GroupChangeClass.Actions.ModifyInviteLinkPasswordAction;
+    modifyDescription?: GroupChangeClass.Actions.ModifyDescriptionAction;
   }
 }
 
@@ -402,6 +407,10 @@ export declare namespace GroupChangeClass.Actions {
   class ModifyInviteLinkPasswordAction {
     inviteLinkPassword?: ProtoBinaryType;
   }
+
+  class ModifyDescriptionAction {
+    descriptionBytes?: ProtoBinaryType;
+  }
 }
 
 export declare class GroupChangesClass {
@@ -431,10 +440,15 @@ export declare class GroupAttributeBlobClass {
   title?: string;
   avatar?: ProtoBinaryType;
   disappearingMessagesDuration?: number;
+  descriptionText?: string;
 
   // Note: this isn't part of the proto, but our protobuf library tells us which
   //   field has been set with this prop.
-  content: 'title' | 'avatar' | 'disappearingMessagesDuration';
+  content:
+    | 'title'
+    | 'avatar'
+    | 'disappearingMessagesDuration'
+    | 'descriptionText';
 }
 
 export declare class GroupExternalCredentialClass {
@@ -480,6 +494,7 @@ export declare class GroupJoinInfoClass {
   addFromInviteLink?: AccessControlClass.AccessRequired;
   version?: number;
   pendingAdminApproval?: boolean;
+  descriptionBytes?: ProtoBinaryType;
 }
 
 // Previous protos
@@ -570,6 +585,7 @@ export declare class ContentClass {
   receiptMessage?: ReceiptMessageClass;
   typingMessage?: TypingMessageClass;
   senderKeyDistributionMessage?: ByteBufferClass;
+  decryptionErrorMessage?: ByteBufferClass;
 }
 
 export declare class DataMessageClass {
@@ -721,6 +737,9 @@ export declare class EnvelopeClass {
   receivedAtDate: number;
   unidentifiedDeliveryReceived?: boolean;
   messageAgeSec?: number;
+  contentHint?: number;
+  groupId?: string;
+  usmc?: UnidentifiedSenderMessageContent;
 }
 
 // Note: we need to use namespaces to express nested classes in Typescript
@@ -730,7 +749,7 @@ export declare namespace EnvelopeClass {
     static PREKEY_BUNDLE: number;
     static RECEIPT: number;
     static UNIDENTIFIED_SENDER: number;
-    static SENDERKEY: number;
+    static PLAINTEXT_CONTENT: number;
   }
 }
 
@@ -1060,6 +1079,7 @@ export declare class AccountRecordClass {
   notDiscoverableByPhoneNumber?: boolean;
   pinnedConversations?: PinnedConversationClass[];
   noteToSelfMarkedUnread?: boolean;
+  universalExpireTimer?: number;
   primarySendsSms?: boolean;
 
   __unknownFields?: ArrayBuffer;
@@ -1386,10 +1406,11 @@ export declare namespace UnidentifiedSenderMessageClass.Message {
     static PREKEY_MESSAGE: number;
     static MESSAGE: number;
     static SENDERKEY_MESSAGE: number;
+    static PLAINTEXT_CONTENT: number;
   }
 
   class ContentHint {
     static SUPPLEMENTARY: number;
-    static RETRY: number;
+    static RESENDABLE: number;
   }
 }
